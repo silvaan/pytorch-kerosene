@@ -16,6 +16,7 @@ class Trainer:
         optimizer,
         epochs,
         data_loaders,
+        scheduler=None,
         model_name=None,
         run_name=None,
         device=None,
@@ -36,6 +37,7 @@ class Trainer:
         self.model = model.to(device)
         self.criterion = criterion
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.epochs = epochs
         self.data_loaders = data_loaders
         self.device = device
@@ -83,6 +85,12 @@ class Trainer:
     def after_epoch(self, *args, **kwargs):
         pass
 
+    def before_test(self, *args, **kwargs):
+        pass
+
+    def after_test(self, *args, **kwargs):
+        pass
+
     # CHECKPOINTS
 
     def save_checkpoint(self, epoch):
@@ -112,6 +120,7 @@ class Trainer:
         checkpoint = torch.load(checkpoint_filepath)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.logger.info(f'Loaded {run_name} checkpoint at epoch {checkpoint["epoch"]}.')
 
     # TRAINING
 
@@ -130,8 +139,8 @@ class Trainer:
     def dict2log(self, metrics):
         values = []
         for phase in metrics.keys():
-            for metric in metrics[phase].keys():
-                values.append(f'{phase}_{metric}: {metrics[phase][metric]:.5f}')
+            for metric, value in metrics[phase].items():
+                values.append(f'{phase}_{metric}: {value:.5f}')
         output = ', '.join(values)
         return output
 
@@ -139,6 +148,9 @@ class Trainer:
         raise NotImplementedError
 
     def validation_step(self, batch):
+        raise NotImplementedError
+
+    def test_step(self, batch):
         raise NotImplementedError
 
     def train(self):
@@ -173,11 +185,13 @@ class Trainer:
                     with torch.no_grad():
                         for batch in self.data_loaders[phase]:
                             batch = self.to_device(batch)
-                            with torch.no_grad():
-                                metrics = self.validation_step(batch)
+                            metrics = self.validation_step(batch)
 
                             for metric, value in metrics.items():
                                 temp_metrics[metric].append(value.detach().item())
+
+                if self.scheduler is not None:
+                    self.scheduler.step()
                             
                 # Average metrics across batches
                 for metric, values in temp_metrics.items():
@@ -196,7 +210,6 @@ class Trainer:
                 self.save_checkpoint(epoch)
             
             self.logger.info(self.dict2log(epoch_metrics))
-            
             self.after_epoch(epoch=epoch, metrics=epoch_metrics)
 
         if self.use_tensorboard:
@@ -208,3 +221,29 @@ class Trainer:
         self.after_train(metrics=training_metrics)
 
         return training_metrics
+    
+    def test(self, test_data_loader):
+        self.before_test()
+        self.logger.info('Starting test...')
+        test_metrics = defaultdict(list)
+        avg_metrics = {}
+
+        self.model.eval()
+        with torch.no_grad():
+            for batch in tqdm(test_data_loader):
+                batch = self.to_device(batch)
+                metrics = self.test_step(batch)
+
+                for metric, value in metrics.items():
+                    test_metrics[metric].append(value.detach().item())
+
+        for metric, values in test_metrics.items():
+            avg_metrics[metric] = sum(values)/len(values)
+        
+        log_text = [f'{metric}: {value:.5f}' for metric, value in avg_metrics.items()]
+        log_text = ', '.join(log_text)
+        self.logger.info(log_text)
+
+        self.after_test()
+
+        return avg_metrics
