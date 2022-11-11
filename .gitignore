@@ -1,3 +1,7 @@
 build
 dist
 pytorch_kerosene.egg-info/
+pytorch_kerosene/__pycache__/
+update.sh
+*.ipynb
+test/
