@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import DataLoader, random_split
 from torchvision.datasets import MNIST
 import torchvision.transforms as T
 from pytorch_kerosene import Trainer
@@ -12,15 +12,14 @@ transforms = T.Compose([
 ])
 
 dataset = MNIST(root='.', download=True, transform=transforms)
-validation_split = 0.2
-val_len = int(len(dataset)*validation_split)
-train_len = len(dataset) - val_len
-train_set, val_set = random_split(dataset, [train_len, val_len])
+sizes = [int(s*len(dataset)) for s in [0.7, 0.15, 0.15]]
+train_set, val_set, test_set = random_split(dataset, *sizes)
 
 data_loaders = {
     'train': DataLoader(train_set, batch_size=32, shuffle=True),
     'val': DataLoader(val_set, batch_size=128, shuffle=True)
 }
+test_loader = DataLoader(test_set, batch_size=128)
 
 
 class MNISTClassifier(nn.Module):
@@ -40,7 +39,8 @@ class MNISTClassifier(nn.Module):
 
 class MyTrainer(Trainer):
     def before_train(self):
-        print(f'Starting training with {self.epochs} epochs in device {self.device}...')
+        X, _ = next(iter(self.data_loaders['train']))
+        self.tb_writer.add_graph(self.model, X)
 
     def training_step(self, batch):
         X, y = batch
@@ -57,22 +57,33 @@ class MyTrainer(Trainer):
         acc = (pred.argmax(-1) == y).sum() / X.shape[0]
         metrics = {'loss': loss, 'acc': acc}
         return metrics
+        
+    def test_step(self, batch):
+        X, y = batch
+        pred = self.model(X)
+        loss = self.criterion(pred, y)
+        acc = (pred.argmax(-1) == y).sum() / X.shape[0]
+        metrics = {'loss': loss, 'acc': acc}
+        return metrics
 
 
 model = MNISTClassifier(784, 10)
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.5)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
 
 trainer = MyTrainer(
     run_name='model_test',
     model=model,
     criterion=criterion,
     optimizer=optimizer,
-    epochs=3,
+    scheduler=scheduler,
+    epochs=8,
     data_loaders=data_loaders,
     save_checkpoints='last',
     checkpoints_dir='checkpoints',
     tensorboard_dir='runs'
 )
 
-metrics = trainer.train()
+train_metrics = trainer.train()
+test_metrics = trainer.test(test_loader)
