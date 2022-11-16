@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 class Trainer:
@@ -22,6 +22,7 @@ class Trainer:
         device=None,
         save_checkpoints='last',
         checkpoints_dir='checkpoints',
+        use_tqdm=True,
         use_logging=True,
         logging_dir='.',
         use_tensorboard=True,
@@ -49,6 +50,7 @@ class Trainer:
         # Logging
         self.set_logger(logging_dir, run_name)
         self.logger.disabled = not use_logging
+        self.use_tqdm = use_tqdm
 
         # Tensorbaord
         self.use_tensorboard = use_tensorboard
@@ -58,8 +60,10 @@ class Trainer:
             self.tb_writer = SummaryWriter(tb_logdir)
 
     def set_logger(self, logging_dir, run_name):
-        self.logger = logging.getLogger()
+        self.logger = logging.getLogger('kerosene')
         self.logger.setLevel(logging.DEBUG)
+        self.logger.handlers.clear()
+        self.logger.propagate = False
 
         sh = logging.StreamHandler(sys.stdout)
         sh.setFormatter(logging.Formatter('%(message)s'))
@@ -144,6 +148,9 @@ class Trainer:
         output = ', '.join(values)
         return output
 
+    def make_pbar(self, iterable):
+        return tqdm(iterable, leave=False, disable=not self.use_tqdm)
+
     def training_step(self, batch):
         raise NotImplementedError
 
@@ -169,7 +176,9 @@ class Trainer:
                 # Training phase
                 if phase == 'train':
                     self.model.train()
-                    for batch in tqdm(self.data_loaders[phase]):
+                    pbar = self.make_pbar(self.data_loaders[phase])
+                    for batch in pbar:
+                    # for batch in tqdm(self.data_loaders[phase], desc=f'{epoch+1}/{self.epochs}', leave=False, disable=not self.use_tqdm):
                         batch = self.to_device(batch)
                         self.optimizer.zero_grad()
                         metrics = self.training_step(batch)
@@ -177,16 +186,19 @@ class Trainer:
                         loss.backward()
                         self.optimizer.step()
 
+                        pbar.set_description(f'[{epoch+1}/{self.epochs}] loss: {loss.item():.3f}')
                         for metric, value in metrics.items():
                             temp_metrics[metric].append(value.detach().item())
                 # Validation phase
                 else:
                     self.model.eval()
                     with torch.no_grad():
-                        for batch in self.data_loaders[phase]:
+                        pbar = self.make_pbar(self.data_loaders[phase])
+                        for batch in pbar:
                             batch = self.to_device(batch)
                             metrics = self.validation_step(batch)
 
+                            pbar.set_description(f'[{epoch+1}/{self.epochs}] loss: {loss.item():.3f}')
                             for metric, value in metrics.items():
                                 temp_metrics[metric].append(value.detach().item())
 
@@ -209,7 +221,7 @@ class Trainer:
             if self.save_checkpoints is not None:
                 self.save_checkpoint(epoch)
             
-            self.logger.info(self.dict2log(epoch_metrics))
+            self.logger.info(f'Epoch {epoch+1}/{self.epochs}: {self.dict2log(epoch_metrics)}')
             self.after_epoch(epoch=epoch, metrics=epoch_metrics)
 
         if self.use_tensorboard:
@@ -230,7 +242,8 @@ class Trainer:
 
         self.model.eval()
         with torch.no_grad():
-            for batch in tqdm(test_data_loader):
+            pbar = self.make_pbar(test_data_loader)
+            for batch in pbar:
                 batch = self.to_device(batch)
                 metrics = self.test_step(batch)
 
@@ -242,7 +255,7 @@ class Trainer:
         
         log_text = [f'{metric}: {value:.5f}' for metric, value in avg_metrics.items()]
         log_text = ', '.join(log_text)
-        self.logger.info(log_text)
+        self.logger.info(f'Test results: {log_text}')
 
         self.after_test()
 
