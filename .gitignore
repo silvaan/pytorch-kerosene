@@ -5,3 +5,5 @@ pytorch_kerosene/__pycache__/
 update.sh
 *.ipynb
 test/
+examples/
+!examples/mnist.py

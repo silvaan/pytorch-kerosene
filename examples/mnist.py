@@ -1,12 +1,9 @@
-import sys
-sys.path.append('../pytorch_kerosene')
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from torchvision.datasets import MNIST
 import torchvision.transforms as T
-from trainer import Trainer
+from pytorch_kerosene import Trainer
 
 
 transforms = T.Compose([
