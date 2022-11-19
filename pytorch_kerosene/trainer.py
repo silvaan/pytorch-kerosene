@@ -48,7 +48,9 @@ class Trainer:
         self.checkpoints_dir = checkpoints_dir
 
         # Logging
-        self.set_logger(logging_dir, run_name)
+        self.use_logging = use_logging
+        self.logging_dir = logging_dir
+        self.set_logger()
         self.logger.disabled = not use_logging
         self.use_tqdm = use_tqdm
 
@@ -59,21 +61,34 @@ class Trainer:
             tb_logdir = os.path.join(self.tensorboard_dir, self.run_name)
             self.tb_writer = SummaryWriter(tb_logdir)
 
-    def set_logger(self, logging_dir, run_name):
+    # LOGGING
+
+    def set_logger(self):
         self.logger = logging.getLogger('kerosene')
         self.logger.setLevel(logging.DEBUG)
         self.logger.handlers.clear()
         self.logger.propagate = False
 
+        if isinstance(self.use_logging, bool):
+            if self.use_logging:
+                self.set_stream_logger()
+                self.set_file_logger()
+        elif isinstance(self.use_logging, str):
+            if 'stream' in self.use_logging:
+                self.set_stream_logger()
+            if 'file' in self.use_logging:
+                self.set_file_logger()
+
+    def set_stream_logger(self):
         sh = logging.StreamHandler(sys.stdout)
         sh.setFormatter(logging.Formatter('%(message)s'))
         self.logger.addHandler(sh)
 
-        if logging_dir is not None:
-            os.makedirs(logging_dir, exist_ok=True)
-            fh = logging.FileHandler(os.path.join(logging_dir, run_name + '.log'))
-            fh.setFormatter(logging.Formatter('%(asctime)s: %(message)s'))
-            self.logger.addHandler(fh)
+    def set_file_logger(self):
+        os.makedirs(self.logging_dir, exist_ok=True)
+        fh = logging.FileHandler(os.path.join(self.logging_dir, self.run_name + '.log'))
+        fh.setFormatter(logging.Formatter('%(asctime)s: %(message)s'))
+        self.logger.addHandler(fh)
 
     # HOOKS
 
@@ -178,7 +193,6 @@ class Trainer:
                     self.model.train()
                     pbar = self.make_pbar(self.data_loaders[phase])
                     for batch in pbar:
-                    # for batch in tqdm(self.data_loaders[phase], desc=f'{epoch+1}/{self.epochs}', leave=False, disable=not self.use_tqdm):
                         batch = self.to_device(batch)
                         self.optimizer.zero_grad()
                         metrics = self.training_step(batch)
@@ -197,6 +211,7 @@ class Trainer:
                         for batch in pbar:
                             batch = self.to_device(batch)
                             metrics = self.validation_step(batch)
+                            loss = metrics['loss']
 
                             pbar.set_description(f'[{epoch+1}/{self.epochs}] loss: {loss.item():.3f}')
                             for metric, value in metrics.items():
