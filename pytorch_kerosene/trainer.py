@@ -17,6 +17,7 @@ class Trainer:
         epochs,
         data_loaders,
         scheduler=None,
+        mixed_precision=True,
         model_name=None,
         run_name=None,
         device=None,
@@ -39,6 +40,7 @@ class Trainer:
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.mixed_precision = mixed_precision
         self.epochs = epochs
         self.data_loaders = data_loaders
         self.device = device
@@ -181,6 +183,8 @@ class Trainer:
         phases = self.data_loaders.keys()
         training_metrics = {phase: defaultdict(list) for phase in phases}
 
+        scaler = torch.cuda.amp.GradScaler(enabled=self.mixed_precision)
+
         for epoch in range(self.epochs):
             self.before_epoch(epoch=epoch)
             epoch_metrics = {phase: {} for phase in phases}
@@ -195,10 +199,17 @@ class Trainer:
                     for batch in pbar:
                         batch = self.to_device(batch)
                         self.optimizer.zero_grad()
-                        metrics = self.training_step(batch)
-                        loss = metrics['loss']
-                        loss.backward()
-                        self.optimizer.step()
+
+                        with torch.cuda.amp.autocast(dtype=torch.float16, enabled=self.mixed_precision):
+                            metrics = self.training_step(batch)
+                            loss = metrics['loss']
+
+                        scaler.scale(loss).backward()
+                        scaler.step(self.optimizer)
+                        scaler.update()
+
+                        # loss.backward()
+                        # self.optimizer.step()
 
                         pbar.set_description(f'[{epoch+1}/{self.epochs}] loss: {loss.item():.3f}')
                         for metric, value in metrics.items():

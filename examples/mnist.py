@@ -78,6 +78,7 @@ trainer = MyTrainer(
     criterion=criterion,
     optimizer=optimizer,
     scheduler=scheduler,
+    mixed_precision=True,
     epochs=10,
     data_loaders=data_loaders,
     save_checkpoints='saved/last',
