@@ -3,6 +3,7 @@ import sys
 import logging
 from collections import defaultdict
 from datetime import datetime
+import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
@@ -21,6 +22,7 @@ class Trainer:
         model_name=None,
         run_name=None,
         device=None,
+        save_dir='.',
         save_checkpoints='last',
         checkpoints_dir='checkpoints',
         use_tqdm=True,
@@ -44,21 +46,22 @@ class Trainer:
         self.epochs = epochs
         self.data_loaders = data_loaders
         self.device = device
+        self.save_dir = save_dir
 
         # Checkpoints
         self.save_checkpoints = save_checkpoints
-        self.checkpoints_dir = checkpoints_dir
+        self.checkpoints_dir = os.path.join(self.save_dir, checkpoints_dir)
 
         # Logging
         self.use_logging = use_logging
-        self.logging_dir = logging_dir
+        self.logging_dir = os.path.join(self.save_dir, logging_dir)
         self.set_logger()
         self.logger.disabled = not use_logging
         self.use_tqdm = use_tqdm
 
         # Tensorbaord
         self.use_tensorboard = use_tensorboard
-        self.tensorboard_dir = tensorboard_dir
+        self.tensorboard_dir = os.path.join(self.save_dir, tensorboard_dir)
         if self.use_tensorboard:
             tb_logdir = os.path.join(self.tensorboard_dir, self.run_name)
             self.tb_writer = SummaryWriter(tb_logdir)
@@ -208,9 +211,6 @@ class Trainer:
                         scaler.step(self.optimizer)
                         scaler.update()
 
-                        # loss.backward()
-                        # self.optimizer.step()
-
                         pbar.set_description(f'[{epoch+1}/{self.epochs}] loss: {loss.item():.3f}')
                         for metric, value in metrics.items():
                             temp_metrics[metric].append(value.detach().item())
@@ -228,8 +228,13 @@ class Trainer:
                             for metric, value in metrics.items():
                                 temp_metrics[metric].append(value.detach().item())
 
-                if self.scheduler is not None:
-                    self.scheduler.step()
+                # Apply schedular
+                if self.scheduler is not None and phase == 'train':
+                    if isinstance(self.scheduler, list) or isinstance(self.scheduler, tuple):
+                        for scheduler in self.scheduler:
+                            scheduler.step()
+                    else:
+                        self.scheduler.step()
                             
                 # Average metrics across batches
                 for metric, values in temp_metrics.items():
@@ -264,7 +269,7 @@ class Trainer:
         self.before_test()
         self.logger.info('Starting test...')
         test_metrics = defaultdict(list)
-        avg_metrics = {}
+        results_metrics = {}
 
         self.model.eval()
         with torch.no_grad():
@@ -277,12 +282,17 @@ class Trainer:
                     test_metrics[metric].append(value.detach().item())
 
         for metric, values in test_metrics.items():
-            avg_metrics[metric] = sum(values)/len(values)
+            results_metrics[metric] = {
+                'mean': np.mean(values),
+                'std': np.std(values),
+                'max': np.max(values),
+                'min': np.min(values)
+            }
         
-        log_text = [f'{metric}: {value:.5f}' for metric, value in avg_metrics.items()]
+        log_text = [f'{metric}: {value["mean"]:.5f}' for metric, value in results_metrics.items()]
         log_text = ', '.join(log_text)
         self.logger.info(f'Test results: {log_text}')
 
         self.after_test()
 
-        return avg_metrics
+        return results_metrics

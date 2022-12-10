@@ -51,29 +51,22 @@ class MyTrainer(Trainer):
         return metrics
 
     def validation_step(self, batch):
-        X, y = batch
-        pred = self.model(X)
-        loss = self.criterion(pred, y)
-        acc = (pred.argmax(-1) == y).sum() / X.shape[0]
-        metrics = {'loss': loss, 'acc': acc}
-        return metrics
+        return self.training_step(batch)
         
     def test_step(self, batch):
-        X, y = batch
-        pred = self.model(X)
-        loss = self.criterion(pred, y)
-        acc = (pred.argmax(-1) == y).sum() / X.shape[0]
-        metrics = {'loss': loss, 'acc': acc}
-        return metrics
+        return self.training_step(batch)
 
 
 model = MNISTClassifier(784, 10)
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
+scheduler = [
+    torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=3),
+    torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5, 8], gamma=0.1),
+]
 
 trainer = MyTrainer(
-    run_name='model_test',
+    run_name='mnist_classifier',
     model=model,
     criterion=criterion,
     optimizer=optimizer,
@@ -81,10 +74,10 @@ trainer = MyTrainer(
     mixed_precision=True,
     epochs=10,
     data_loaders=data_loaders,
-    save_checkpoints='saved/last',
-    checkpoints_dir='saved/checkpoints',
-    tensorboard_dir='saved/runs'
+    save_dir='saved',
 )
 
 train_metrics = trainer.train()
 test_metrics = trainer.test(test_loader)
+
+print(test_metrics)
